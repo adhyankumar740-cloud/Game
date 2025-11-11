@@ -1,4 +1,4 @@
-# main.py (All-in-One Bot: No Chatting, Quiz Polls + Word Hustle)
+# main.py (All-in-One Bot: Game-focused, NATIVE QUIZ POLLS, Word Hustle, FIXED)
 
 import telegram
 from telegram import Update, constants, InlineKeyboardButton, InlineKeyboardMarkup
@@ -23,6 +23,7 @@ import traceback
 import json
 import time 
 import uuid 
+
 # --- 💡 Import from new modules ---
 from db_manager import (
     setup_database, get_db_connection, get_bot_value, set_bot_value, 
@@ -68,7 +69,15 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.error("Exception while handling an update:", exc_info=context.error)
     tb_list = traceback.format_exception(None, context.error, context.error.__traceback__)
     tb_string = "".join(tb_list)
-    # ... (Error message sending logic remains) ...
+    update_str = update.to_dict() if isinstance(update, Update) else str(update)
+    message = (
+        f"An exception was raised while handling an update\n"
+        f"<pre>update = {html.escape(json.dumps(update_str, indent=2, ensure_ascii=False))}</pre>\n\n"
+        f"<pre>context.chat_data = {html.escape(str(context.chat_data))}</pre>\n\n"
+        f"<pre>context.user_data = {html.escape(str(context.user_data))}</pre>\n\n"
+        f"<pre>{html.escape(tb_string)}</pre>"
+    )
+    logger.error(message) 
     if update and isinstance(update, Update) and update.effective_chat:
         try:
             await context.bot.send_message(
@@ -80,17 +89,191 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
             logger.error(f"Failed to send error message to chat: {e}")
 
 # ======================================================================
-# --- 🏆 LEADERBOARD COMMANDS (UPDATED: Quiz Score Only) ---
+# --- 📝 STANDARD COMMANDS (FIXED - ADDED BACK) ---
 # ======================================================================
 
-# /broadcast, /release_lock, /img, /gen, /get_id commands remain unchanged.
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    register_chat(update)
+    bot = await context.bot.get_me()
+    bot_name = escape_markdown(bot.first_name, version=2)
+    user_name = escape_markdown(update.effective_user.first_name, version=2)
+    start_text = (
+        f"👋 *Hi {user_name}, I'm {bot_name}*\\!\n\n"
+        f"I'm a **Game-focused Bot** here to bring fun with Quizzes and Word Hustle challenges\\.\n\n"
+        f"**What I can do:**\n"
+        f"• 🏆 Track Quiz/Hustle scores \\(/ranking\\)\n"
+        f"• 👤 Check your score with \\(/profile\\)\n"
+        f"• 🧠 Trigger automatic Quiz Polls as you chat\n"
+        f"• 🔠 Start a **Word Hustle** game with \\(/hustle\\)\n"
+        f"• 🏅 Check your personal score \\(/myscore\\)\n\n"
+        f"Just start chatting to potentially trigger a quiz, or use \\/hustle to start a challenge\\!"
+    )
+    photo_id = START_PHOTO_ID
+    if photo_id:
+        try:
+            await context.bot.send_photo(chat_id=update.effective_chat.id, photo=photo_id, caption=start_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
+        except:
+            await update.message.reply_text(start_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
+    else:
+        await update.message.reply_text(start_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
+
+async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.new_chat_members: return
+    register_chat(update)
+    chat_id = update.effective_chat.id
+    chat_name = html.escape(update.effective_chat.title or "this chat")
+    video_id = None
+    if WELCOME_VIDEO_URLS:
+        video_index = get_bot_value(VIDEO_COUNTER_KEY, 0)
+        video_id = WELCOME_VIDEO_URLS[video_index % len(WELCOME_VIDEO_URLS)]
+        set_bot_value(VIDEO_COUNTER_KEY, video_index + 1)
+    for member in update.message.new_chat_members:
+        if member.is_bot: continue
+        welcome_message = f"👋 <b>Welcome to {chat_name}</b>!\n\nUser: {member.mention_html()}\n\nStart playing quizzes and hustle to earn your spot on the leaderboard! 🏆"
+        try:
+            if video_id:
+                await context.bot.send_video(chat_id=chat_id, video=video_id, caption=welcome_message, parse_mode=constants.ParseMode.HTML)
+            else:
+                await context.bot.send_message(chat_id=chat_id, text=welcome_message, parse_mode=constants.ParseMode.HTML)
+        except Exception as e:
+            logger.error(f"Error during welcome message: {e}")
+            await context.bot.send_message(chat_id=chat_id, text=welcome_message, parse_mode=constants.ParseMode.HTML)
+
+async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    bot = await context.bot.get_me()
+    bot_name = escape_markdown(bot.first_name, version=2)
+    about_text = (
+        f"👋 *About Me*\n\nHi, I'm {bot_name}\\!\n\n"
+        f"I was created for gaming and group engagement\\.\n\n"
+        f"**Features:**\n"
+        f"• Quiz/Hustle rankings \\(/ranking\\)\n"
+        f"• User profiles \\(/profile\\)\n"
+        f"• Automatic quizzes (via polls)\n"
+        f"• Word Hustle game \\(/hustle\\)\n"
+        f"• Personal score tracking \\(/myscore\\)\n"
+        f"• Image search \\(/img\\)\n"
+        f"• AI Image generation \\(/gen\\)\n\n"
+        f"•Owner: Gopu\n"
+    )
+    if OWNER_ID: about_text += f"You can contact my owner for support: [Owner](tg://user?id={OWNER_ID})\n"
+    photo_id = ABOUT_PHOTO_ID
+    if photo_id:
+        try:
+            await context.bot.send_photo(chat_id=update.effective_chat.id, photo=photo_id, caption=about_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
+        except:
+            await update.message.reply_text(about_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
+    else:
+        await update.message.reply_text(about_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
+
+async def myscore_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    score = get_user_score(user_id)
+    user_name = html.escape(update.effective_user.first_name)
+    await update.message.reply_text(f"🏆 <b>{user_name}'s Total Game Score</b>\n\nYou have earned a total of <b>{score}</b> points!", parse_mode=constants.ParseMode.HTML)
+
+async def get_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.reply_to_message: await update.message.reply_text("Please reply to a media file."); return
+    replied_msg = update.message.reply_to_message
+    file_id = (
+        replied_msg.video.file_id if replied_msg.video else
+        replied_msg.photo[-1].file_id if replied_msg.photo else
+        replied_msg.audio.file_id if replied_msg.audio else
+        replied_msg.document.file_id if replied_msg.document else
+        replied_msg.sticker.file_id if replied_msg.sticker else None
+    )
+    file_type = (
+        "Video" if replied_msg.video else "Photo" if replied_msg.photo else
+        "Audio" if replied_msg.audio else "Document" if replied_msg.document else
+        "Sticker" if replied_msg.sticker else "Unknown"
+    )
+    if file_id:
+        await update.message.reply_text(f"<b>{file_type} File ID:</b> <code>{file_id}</code>", parse_mode=constants.ParseMode.HTML)
+    else:
+        await update.message.reply_text("Could not find a File ID.")
+
+async def img_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not PEXELS_API_KEY: await update.message.reply_text("Image search is disabled."); return
+    if not context.args: await update.message.reply_text("Example: `/img nature`"); return
+    query = " ".join(context.args)
+    url = f"https://api.pexels.com/v1/search?query={query}&per_page=15"
+    headers = {"Authorization": PEXELS_API_KEY}
+    try:
+        response = requests.get(url, headers=headers, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        if not data.get('photos'): await update.message.reply_text(f"No images found for '{query}'."); return
+        photo_url = random.choice(data['photos'])['src']['large']
+        await update.message.reply_photo(photo_url, caption=f"Requested: {query}")
+    except Exception as e:
+        logger.error(f"Pexels API error: {e}"); await update.message.reply_text("Error with image search.")
+
+async def gen_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not STABLE_HORDE_API_KEY or STABLE_HORDE_API_KEY == '0000000000': await update.message.reply_text("Image generation is disabled."); return
+    if not context.args: await update.message.reply_text("Example: `/gen a cat in space`"); return
+    prompt = " ".join(context.args)
+    sent_msg = await update.message.reply_text(f"🎨 Generating '{prompt}'...")
+    try:
+        post_url = "https://stablehorde.net/api/v2/generate/async"
+        headers = {"apikey": STABLE_HORDE_API_KEY, "Client-Agent": "TelegramBot/1.0"}
+        payload = {"prompt": prompt, "params": { "n": 1, "width": 512, "height": 512 }}
+        post_response = requests.post(post_url, json=payload, headers=headers, timeout=10)
+        post_response.raise_for_status()
+        generation_id = post_response.json()['id']
+        start_time = time.time()
+        while time.time() - start_time < 120:
+            await asyncio.sleep(5)
+            check_url = f"https://stablehorde.net/api/v2/generate/check/{generation_id}"
+            check_response = requests.get(check_url, timeout=5)
+            check_data = check_response.json()
+            if check_data.get('done', False):
+                status_url = f"https://stablehorde.net/api/v2/generate/status/{generation_id}"
+                status_response = requests.get(status_url, timeout=5)
+                img_url = status_response.json()['generations'][0]['img']
+                await sent_msg.delete()
+                await update.message.reply_photo(img_url, caption=f"*Prompt:* {escape_markdown(prompt, version=2)}", parse_mode=constants.ParseMode.MARKDOWN_V2)
+                return
+        await sent_msg.edit_text("Generation timed out.")
+    except Exception as e:
+        logger.error(f"Stable Horde error: {e}"); await sent_msg.edit_text(f"Sorry, an error occurred: {e}")
+
+async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not OWNER_ID or str(update.effective_user.id) != str(OWNER_ID):
+        await update.message.reply_text("This is an owner-only command.")
+        return
+    message_text = update.message.text.split(' ', 1)
+    if len(message_text) < 2: await update.message.reply_text("Usage: /broadcast <message>"); return
+    text_to_send = message_text[1]
+    chat_ids = get_all_active_chat_ids()
+    sent_count, failed_count = 0, 0
+    await update.message.reply_text(f"Starting broadcast to {len(chat_ids)} chats...")
+    for chat_id in chat_ids:
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=text_to_send, parse_mode=constants.ParseMode.HTML)
+            sent_count += 1
+        except (telegram.error.Forbidden, telegram.error.BadRequest) as e:
+            deactivate_chat_in_db(chat_id)
+            failed_count += 1
+        except Exception as e:
+            logger.error(f"Failed to send broadcast to {chat_id}: {e}")
+            failed_count += 1
+        await asyncio.sleep(0.2)
+    await update.message.reply_text(f"Broadcast complete.\nSent: {sent_count}\nFailed: {failed_count}")
+
+async def release_lock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not OWNER_ID or str(update.effective_user.id) != str(OWNER_ID):
+        await update.message.reply_text("This is an owner-only command."); return
+    set_bot_value(LOCK_KEY, False)
+    set_bot_value(LAST_GLOBAL_QUIZ_KEY, datetime.now(timezone.utc).timestamp()) 
+    await update.message.reply_text("✅ Global quiz lock released, and global timer reset.")
+
+# ======================================================================
+# --- 🏆 LEADERBOARD COMMANDS (Game Score Only) ---
+# ======================================================================
 
 def get_leaderboard_data(page=0, per_page=10):
-    # Ab sirf quiz score wala function use hoga
     return get_leaderboard_data_quiz_only(page, per_page)
 
 async def ranking_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # message_count tracking is now removed.
     await send_leaderboard_page(update, context, page=0)
 
 async def send_leaderboard_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page=0):
@@ -100,14 +283,12 @@ async def send_leaderboard_page(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("No one has earned a score yet.")
         return
     total_pages = (total_users + per_page - 1) // per_page
-    # Title updated to reflect game focus
     text = "🧠 **Quiz & Hustle Score Leaderboard** 🏆\n\n"
     rank_start = page * per_page
     for i, (first_name, score) in enumerate(top_users):
         rank = rank_start + i + 1
         name = html.escape(first_name or "Anonymous")
         emoji = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else "🔹"
-        # Displaying score instead of message count
         text += f"{emoji} **{rank}.** {name} - {score} points\n"
     text += f"\nPage {page + 1} of {total_pages}"
     buttons = []
@@ -138,19 +319,16 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     conn = get_db_connection()
     cur = conn.cursor()
-    # Only querying quiz_score
     cur.execute("SELECT quiz_score FROM user_data WHERE user_id = %s", (user_id,))
     result = cur.fetchone()
     quiz_score = result[0] if result else 0
     
-    # Getting rank based on quiz_score only
     cur.execute("SELECT rank FROM (SELECT user_id, ROW_NUMBER() OVER (ORDER BY quiz_score DESC) as rank FROM user_data WHERE quiz_score > 0) as ranked_users WHERE user_id = %s", (user_id,))
     rank_result = cur.fetchone()
     rank = rank_result[0] if rank_result else "N/A"
     cur.close()
     conn.close()
     
-    # Text updated to remove message count
     text = f"👤 **User Profile**\n\n**Name:** {mention}\n**User ID:** <code>{user_id}</code>\n\n--- **Game Stats** ---\n🏆 **Score Rank:** {rank}\n🧠 **Total Score:** {quiz_score} points"
     await update.message.reply_text(text, parse_mode=constants.ParseMode.HTML)
 
@@ -174,11 +352,13 @@ async def timer_status_command(update: Update, context: ContextTypes.DEFAULT_TYP
     time_remaining = max(0, GLOBAL_QUIZ_COOLDOWN - time_elapsed)
     
     # Status
-    status = "🔴 ACTIVE" if is_locked else "🟢 FREE"
+    status = "🔴 ACTIVE (Quiz broadcast in progress)" if is_locked else "🟢 FREE (Ready to broadcast)"
     cooldown_status = "✅ READY" if time_remaining <= 0 else f"⏳ {int(time_remaining)} seconds left"
     
     quiz_polls_count = len(get_bot_value(OPEN_QUIZZES_KEY, {}))
-    hustle_games_count = len(get_bot_value(HUSTLE_GAME_KEY, {}))
+    # Filter only active hustle games
+    active_games = get_bot_value(HUSTLE_GAME_KEY, {})
+    active_hustle_games_count = sum(1 for game in active_games.values() if game.get('active'))
     
     text = (
         f"**⌛ Global Timer Status (Owner Only)**\n\n"
@@ -187,12 +367,14 @@ async def timer_status_command(update: Update, context: ContextTypes.DEFAULT_TYP
         f"**Cooldown ({GLOBAL_QUIZ_COOLDOWN}s):** `{cooldown_status}`\n\n"
         f"--- **Active Games** ---\n"
         f"**Open Quizzes (Polls):** `{quiz_polls_count}`\n"
-        f"**Open Word Hustle:** `{hustle_games_count}`"
+        f"**Open Word Hustle:** `{active_hustle_games_count}`"
     )
     
     await update.message.reply_text(text, parse_mode=constants.ParseMode.MARKDOWN_V2)
 
-# --- QUIZ LOGIC (Unchanged, from previous step) ---
+# ======================================================================
+# --- 🧠 QUIZ LOGIC (Unchanged) ---
+# ======================================================================
 
 async def fetch_quiz_data_from_api():
     TRIVIA_API_URL = "https://opentdb.com/api.php?amount=1&type=multiple"
@@ -304,7 +486,6 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if chosen_option_index == quiz_info['correct_option_id']:
         current_score = get_user_score(user_id)
         new_score = current_score + 1
-        # Also update user's name/username
         set_user_score(user_id, new_score, first_name=user.first_name, username=user.username) 
         
         quiz_info['answered_users'].append(user_id)
@@ -354,22 +535,23 @@ async def send_quiz_after_n_messages(update: Update, context: ContextTypes.DEFAU
 
     # --- 2. Check for Quiz Trigger (No Message Count update needed now) ---
     register_chat(update)
-    if is_blocked: return
     
-    last_quiz_time = get_bot_value(LAST_GLOBAL_QUIZ_KEY, 0)
-    
-    if current_time - last_quiz_time > GLOBAL_QUIZ_COOLDOWN:
-        if not check_and_set_bot_lock(LOCK_KEY):
-            logger.info("Quiz trigger attempted, but lock is already held."); return 
+    # --- 3. Check for Quiz Trigger ---
+    if not is_blocked:
+        last_quiz_time = get_bot_value(LAST_GLOBAL_QUIZ_KEY, 0)
         
-        logger.info(f"Global quiz cooldown over. Triggered by user {user_id}. ACQUIRING LOCK.")
-        
-        asyncio.create_task(staggered_broadcast_job(context))
-        
-        logger.info(f"Created background task for staggered broadcast. Handler is now free.")
-    else:
-        # Check for Word Hustle Guesses
-        await handle_hustle_guess(update, context)
+        if current_time - last_quiz_time > GLOBAL_QUIZ_COOLDOWN:
+            if not check_and_set_bot_lock(LOCK_KEY):
+                logger.info("Quiz trigger attempted, but lock is already held."); return 
+            
+            logger.info(f"Global quiz cooldown over. Triggered by user {user_id}. ACQUIRING LOCK.")
+            
+            asyncio.create_task(staggered_broadcast_job(context))
+            
+            logger.info(f"Created background task for staggered broadcast. Handler is now free.")
+        else:
+            # Check for Word Hustle Guesses
+            await handle_hustle_guess(update, context)
 
 
 # ======================================================================
@@ -397,6 +579,7 @@ def main():
     application.add_error_handler(error_handler)
     
     # --- Command Handlers ---
+    # Standard Commands (FIXED: Definitions added above)
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("about", about_command))
     application.add_handler(CommandHandler("broadcast", broadcast_command))
@@ -409,14 +592,14 @@ def main():
     
     # Game Commands
     application.add_handler(CommandHandler("myscore", myscore_command))
-    application.add_handler(CommandHandler("hustle", start_hustle_game)) # 💡 NEW GAME
+    application.add_handler(CommandHandler("hustle", start_hustle_game)) # Word Hustle
     
     # Utility Commands
     application.add_handler(CommandHandler("img", img_command))
     application.add_handler(CommandHandler("gen", gen_command))
     application.add_handler(CommandHandler("get_id", get_id_command))
     application.add_handler(CommandHandler("release_lock", release_lock_command))
-    application.add_handler(CommandHandler("timer_status", timer_status_command)) # 💡 NEW OWNER COMMAND
+    application.add_handler(CommandHandler("timer_status", timer_status_command)) # Owner Command
 
     # Message Handlers
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
