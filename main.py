@@ -247,7 +247,8 @@ async def start_hustle_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     active_games = get_bot_value(HUSTLE_GAME_KEY, {})
     if str(chat_id) in active_games and active_games[str(chat_id)].get('active'):
-        await update.message.reply_text("⏳ **Word Hustle** already running! Guess the word or wait for it to end.", parse_mode=constants.ParseMode.MARKDOWN_V2)
+        # ✅ CORRECTED CODE FOR main.py, LINE 250
+        await update.message.reply_text("⏳ **Word Hustle** already running\\! Guess the word or wait for it to end\\.", parse_mode=constants.ParseMode.MARKDOWN_V2)
         return
 
     original_word = await fetch_random_word()
