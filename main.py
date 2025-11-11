@@ -915,7 +915,7 @@ def main():
         .concurrent_updates(True)
         .connect_timeout(10)   
         .read_timeout(15)      
-        .write_timeout(1S5)     
+        .write_timeout(15)     
         .http_version('1.1')
         .build()
     )
