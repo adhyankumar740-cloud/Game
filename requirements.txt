@@ -1,0 +1,3 @@
+python-telegram-bot[job-queue,webhook]
+requests
+psycopg2-binary
